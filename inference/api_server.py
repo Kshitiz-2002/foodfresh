@@ -2,12 +2,14 @@
 import os, io, json
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+import requests # Add this import
 
 import numpy as np
 from PIL import Image
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 # PyTorch
 import torch
@@ -20,14 +22,37 @@ from tensorflow.keras.models import load_model
 
 # QR code
 import qrcode  # pip install qrcode pillow
+import google.generativeai as genai
+
+# Gemini API Key
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    genai.configure(api_key='AIzaSyAJsfWVufmIk6ZX90rMKm6ecI5qAQEe1wI')
+
+# --- Model Configuration ---
+# Option 1: Use local paths (for local development)
+# PT_WEIGHTS = r".\models\classifiers\resnet50\resnet50_perishpredict_best.pt"
+# KERAS_H5   = r".\models\inception_fresh_rotten_best.h5"
+
+# Option 2: Use Hugging Face Hub URLs (for deployment)
+# Replace with your actual username and repo name
+HF_REPO = "Kshitiz02/food-fresh-ai-models"
+PT_WEIGHTS_URL = f"https://huggingface.co/{HF_REPO}/resolve/main/resnet50_perishpredict_best.pt"
+KERAS_H5_URL = f"https://huggingface.co/{HF_REPO}/resolve/main/inception_fresh_rotten_best.h5"
+
+# Use environment variables to choose, defaulting to URLs for deployment
+PT_WEIGHTS = os.getenv("PT_WEIGHTS", PT_WEIGHTS_URL)
+KERAS_H5   = os.getenv("KERAS_H5", KERAS_H5_URL)
+
+# Local directory to cache downloaded models
+MODEL_CACHE_DIR = Path("./.model_cache")
+MODEL_CACHE_DIR.mkdir(exist_ok=True)
 
 FRESH_TOKENS_DEFAULT  = ["fresh"]
 ROTTEN_TOKENS_DEFAULT = ["rotten","spoiled","spoilt","bad","decay","decayed","mold","mould"]
 
 # Configure via env vars or keep defaults
-PT_WEIGHTS = os.getenv("PT_WEIGHTS", r".\models\classifiers\resnet50\resnet50_perishpredict_best.pt")
 PT_ARCH    = os.getenv("PT_ARCH", "resnet")  # resnet|inception
-KERAS_H5   = os.getenv("KERAS_H5", r".\models\inception_fresh_rotten_best.h5")
 THRESHOLD  = float(os.getenv("THRESHOLD", "0.35"))
 
 def device_auto():
@@ -35,6 +60,21 @@ def device_auto():
 
 def bytes_to_pil(b: bytes) -> Image.Image:
     return Image.open(io.BytesIO(b)).convert("RGB")
+
+def download_model(url: str, cache_dir: Path) -> str:
+    """Downloads a model from a URL to a local cache directory if it doesn't exist."""
+    if url.startswith("http"):
+        filename = url.split("/")[-1]
+        local_path = cache_dir / filename
+        if not local_path.exists():
+            print(f"Downloading model from {url} to {local_path}...")
+            with requests.get(url, stream=True) as r:
+                r.raise_for_status()
+                with open(local_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        f.write(chunk)
+        return str(local_path)
+    return url # It's already a local path
 
 def build_token_sets(classes, fresh_tokens, rotten_tokens):
     fresh_idx, rotten_idx = set(), set()
@@ -121,17 +161,27 @@ def _png_response(pil_img: Image.Image):
 def make_app() -> FastAPI:
     app = FastAPI(title="FoodFreshAI Classifier API")
 
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
     @app.on_event("startup")
     async def _load():
         app.state.device = device_auto()
         # Load PT (required)
+        pt_path = download_model(PT_WEIGHTS, MODEL_CACHE_DIR)
         try:
-            app.state.pt = load_pt(PT_WEIGHTS, PT_ARCH, app.state.device)
+            app.state.pt = load_pt(pt_path, PT_ARCH, app.state.device)
         except Exception as e:
             raise RuntimeError(f"PT load failed: {e}")
         # Load Keras (optional)
+        keras_path = download_model(KERAS_H5, MODEL_CACHE_DIR)
         try:
-            app.state.k = load_keras(KERAS_H5)
+            app.state.k = load_keras(keras_path)
         except Exception:
             app.state.k = None
 
@@ -183,6 +233,25 @@ def make_app() -> FastAPI:
         base = str(request.base_url)
         img = qrcode.make(f"{base}v1/classify")
         return _png_response(img)
+
+    @app.post("/v1/gemini_classify")
+    async def gemini_classify(file: UploadFile = File(...)):
+        if not GEMINI_API_KEY:
+            raise HTTPException(status_code=500, detail="Gemini API key not configured")
+
+        try:
+            model = genai.GenerativeModel('gemini-2.5-flash')
+            image_bytes = await file.read()
+            pil_image = Image.open(io.BytesIO(image_bytes))
+            
+            response = model.generate_content([
+                "You are a food expert. Analyze the image of the food item and determine if it is fresh or rotten. Provide a confidence score for your prediction and an estimated shelf life in days.",
+                pil_image
+            ])
+            
+            return JSONResponse(content={"prediction": response.text})
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
 
     return app
 
