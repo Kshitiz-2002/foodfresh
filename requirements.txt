@@ -1,11 +1,14 @@
 fastapi==0.121.0
 uvicorn
 python-multipart
-Pillow
-numpy
-torch
-torchvision
-tensorflow
-qrcode==8.2
-requests==2.32.5
+Pillow==10.4.0
+
+# Pin ML libraries to known compatible versions to solve dependency conflicts
+numpy==1.26.4
+torch==2.3.1
+torchvision==0.18.1
+tensorflow==2.16.1
+
+qrcode
+requests
 google-generativeai==0.7.1
