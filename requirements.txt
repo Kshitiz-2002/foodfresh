@@ -3,11 +3,11 @@ uvicorn
 python-multipart
 Pillow==10.4.0
 
-# Pin ML libraries to known compatible versions to solve dependency conflicts
-numpy==1.26.4
-torch==2.3.1
-torchvision==0.18.1
-tensorflow==2.16.1
+# Pin ML libraries to newer, compatible versions for the deployment environment
+numpy==2.0.0
+torch==2.5.0
+torchvision==0.20.0
+tensorflow==2.17.0
 
 qrcode
 requests
