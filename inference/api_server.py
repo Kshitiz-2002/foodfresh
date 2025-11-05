@@ -26,8 +26,11 @@ import google.generativeai as genai
 
 # Gemini API Key
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# IMPORTANT: The key below was found in your code. It is a major security risk.
+# You should revoke it immediately in your Google Cloud console and use environment variables instead.
+# genai.configure(api_key='AIzaSyAJsfWVufmIk6ZX90rMKm6ecI5qAQEe1wI')
 if GEMINI_API_KEY:
-    genai.configure(api_key='AIzaSyAJsfWVufmIk6ZX90rMKm6ecI5qAQEe1wI')
+    genai.configure(api_key=GEMINI_API_KEY)
 
 # --- Model Configuration ---
 # Option 1: Use local paths (for local development)
@@ -236,7 +239,7 @@ def make_app() -> FastAPI:
 
     @app.post("/v1/gemini_classify")
     async def gemini_classify(file: UploadFile = File(...)):
-        if not GEMINI_API_KEY:
+        if not genai.conf.api_key:
             raise HTTPException(status_code=500, detail="Gemini API key not configured")
 
         try:
