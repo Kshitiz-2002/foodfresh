@@ -11,4 +11,4 @@ tensorflow
 
 qrcode
 requests
-google-generativeai=
+google-generativeai
