@@ -168,30 +168,49 @@ def make_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    @app.on_event("startup")
-    async def _load():
-        app.state.device = device_auto()
-        # Load PT (required)
+    # Initialize state
+    app.state.pt = None
+    app.state.k = None
+    app.state.device = device_auto()
+    app.state.loading = False # Add a lock to prevent multiple downloads
+
+    async def _load_models():
+        """Asynchronously downloads and loads models into app state."""
+        app.state.loading = True
         pt_path = download_model(PT_WEIGHTS, MODEL_CACHE_DIR)
         try:
             app.state.pt = load_pt(pt_path, PT_ARCH, app.state.device)
         except Exception as e:
-            raise RuntimeError(f"PT load failed: {e}")
-        # Load Keras (optional)
+            print(f"Error loading PyTorch model: {e}") # Log error instead of crashing
+
         keras_path = download_model(KERAS_H5, MODEL_CACHE_DIR)
         try:
             app.state.k = load_keras(keras_path)
-        except Exception:
-            app.state.k = None
+        except Exception as e:
+            print(f"Error loading Keras model: {e}") # Log error
+        app.state.loading = False
 
     @app.get("/health")
-    def health():
-        return {"status": "ok", "pt_loaded": app.state.pt is not None, "keras_loaded": app.state.k is not None}
+    async def health():
+        """Reports the current status of the models."""
+        if app.state.loading:
+            return {"status": "models_loading"}
+        if app.state.pt is not None or app.state.k is not None:
+            return {"status": "ready", "pt_loaded": app.state.pt is not None, "keras_loaded": app.state.k is not None}
+        return {"status": "not_loaded"}
+
+    @app.post("/v1/load-models")
+    async def load_models_endpoint(background_tasks: Request.background_tasks):
+        """Triggers the model download and loading process in the background."""
+        if app.state.loading or (app.state.pt is not None or app.state.k is not None):
+            return {"message": "Models are already loaded or in the process of loading."}
+        background_tasks.add_task(_load_models)
+        return {"message": "Model loading process started in the background. Check /health for status."}
 
     @app.post("/v1/classify")
     async def classify(files: List[UploadFile] = File(...)):
-        if app.state.pt is None and app.state.k is None:
-            raise HTTPException(500, "No models loaded")
+        if app.state.loading or (app.state.pt is None and app.state.k is None):
+            raise HTTPException(status_code=503, detail="Models are not loaded. Please call the POST /v1/load-models endpoint first and wait for completion.")
         results = []
         for uf in files:
             b = await uf.read()
