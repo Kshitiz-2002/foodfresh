@@ -1,14 +1,14 @@
-fastapi==0.111.0
-uvicorn[standard]==0.30.1
-python-multipart==0.0.9
-Pillow==10.4.0
+fastapi
+uvicorn[standard]
+python-multipart
+Pillow
 
 # Pin ML libraries to newer, compatible versions for the deployment environment
-numpy==1.26.4
-torch==2.3.1
-torchvision==0.18.1
-tensorflow==2.16.2
+numpy
+torch
+torchvision
+tensorflow
 
-qrcode==7.4.2
-requests==2.32.3
-google-generativeai==0.7.1
+qrcode
+requests
+google-generativeai
